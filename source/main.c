@@ -95,8 +95,6 @@ void reloc_patcher(u32 payload_dst, u32 payload_src, u32 payload_size)
 
 int launch_payload(char *path)
 {
-	gfx_clear_grey(0x1B);
-	gfx_con_setpos(0, 0);
 	if (!path)
 		return 1;
 
@@ -225,6 +223,20 @@ static inline void _show_errors()
 	}
 }
 
+FRESULT easy_rename(const char* old, const char* new)
+{
+	FRESULT res = FR_OK;
+	if (f_stat(old, NULL) == FR_OK) {
+		if (f_stat(new, NULL) == FR_OK) {
+			res = f_unlink(new);
+		}
+		if (res == FR_OK) {
+			res = f_rename(old, new);
+		}
+	}
+	return res;
+}
+
 void ipl_main()
 {
 	// Do initial HW configuration. This is compatible with consecutive reruns without a reset.
@@ -277,28 +289,49 @@ void ipl_main()
 
 	hidInit();
 	_show_errors();
-	gfx_clearscreen();
+	gfx_clear_grey(0x1B);
 
-	int res = -1;
+	WPRINTF("          _                                   ");
+	WPRINTF("  ____ _ (_)____                              ");
+	WPRINTF(" / __ `// // __ \\                             ");
+	WPRINTF("/ /_/ // // /_/ /                             ");
+	WPRINTF("\\__,_//_/ \\____/    _  __         __          ");
+	WPRINTF("   _____ _      __ (_)/ /_ _____ / /_         ");
+	WPRINTF("  / ___/| | /| / // // __// ___// __ \\        ");
+	WPRINTF(" (__  ) | |/ |/ // // /_ / /__ / / / /        ");
+	WPRINTF("/____/  |__/|__//_/ \\__/ \\___//_/ /_/         ");
+	WPRINTF("                     __        __             ");
+	WPRINTF("  __  __ ____   ____/ /____ _ / /_ ___   _____");
+	WPRINTF(" / / / // __ \\ / __  // __ `// __// _ \\ / ___/");
+	WPRINTF("/ /_/ // /_/ // /_/ // /_/ // /_ /  __// /    ");
+	WPRINTF("\\__,_// .___/ \\__,_/ \\__,_/ \\__/ \\___//_/     ");
+	WPRINTF("     /_/                                      ");
+	usleep(1000000); // Display the text for a second
 
-	if (btn_read() & BTN_VOL_DOWN || DumpKeys())
-		res = GetKeysFromFile("sd:/switch/prod.keys");
+	if (!h_cfg.errors) {
+		easy_rename("atmosphere/fusee-secondary.bin.aio", "atmosphere/fusee-secondary.bin");
+		easy_rename("sept/payload.bin.aio", "sept/payload.bin");
+		easy_rename("atmosphere/stratosphere.romfs.aio", "atmosphere/stratosphere.romfs");
+		easy_rename("atmosphere/package3.aio", "atmosphere/package3");
 
-	TConf.keysDumped = (res > 0) ? 0 : 1;
+		// If the console is a patched or Mariko unit
+		if (h_cfg.t210b01 || h_cfg.rcm_patched) {
+			easy_rename("payload.bin.aio", "payload.bin");
+			power_set_state(POWER_OFF_REBOOT);
+		}
 
-	if (res > 0)
-		DrawError(newErrCode(TE_ERR_KEYDUMP_FAIL));
-	
-	if (TConf.keysDumped)
-		SetKeySlots();
-	
-	if (res == 0)
-		hidWait();
+		else {
+			if (f_stat("bootloader/update.bin", NULL) == FR_OK)
+				launch_payload("bootloader/update.bin");
 
-	if (FileExists("sd:/startup.te"))
-		RunScript("sd:/", newFSEntry("startup.te"));
+			if (f_stat("atmosphere/reboot_payload.bin", NULL) == FR_OK)	
+				launch_payload("atmosphere/reboot_payload.bin");
 
-	EnterMainMenu();
+			EPRINTF("Failed to launch payload.");
+		}
+	}
+
+	sd_end();
 
 	// Halt BPMP if we managed to get out of execution.
 	while (true)
